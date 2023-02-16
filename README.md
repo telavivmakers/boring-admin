@@ -9,11 +9,11 @@ purpose:
 for each payment in bank report,
   creates a DONATION RECEIPT (type #405) entity in our account at "Heshbonit Yeruka" (AKA "morning")
 
-			WARNING !!!!!!!!
-			does NOT check for duplicates!!!!
-			yet.
-			@TODO
-
+todo:
+=============
+		למיין לפי תאריך ולהזין  אותם בסדר עולה מהישן לחדש 
+		לבדוק קודם את תאריך הקבלה האחרונה שיצאה, כדי להתחיל לא מוקדם מהתאריך הזה.
+		לבדוק שאין כפילויות.  כרגע המערכת שלהם מאפשרת לי ליצור 2 קבלות עם אותם נתונים, בלי שום הערה או אזהרה
 
 install:
 ==========
