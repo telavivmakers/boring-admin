@@ -33,7 +33,7 @@ srsly now, tami automation team suggest to setup using python3.8[1]
 git clone git@github.com:telavivmakers/boring-admin.git 
 cd boring-admin
 python -m venv .venv
-source ./.venv/scripts/activate #omit the source command on linux
+source ./.venv/scripts/activate #omit the source command on windows
 ./venv/scripts/pip install pip --update
 pip install green_invoice requests
 ```
