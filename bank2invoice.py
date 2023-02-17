@@ -259,7 +259,7 @@ def main(xl_file, conf):
 
     existing = get_existing_documents(default_doctype)  # needed to prevent duplicates
 
-    s = open(xl_file).read()
+    s = open(xl_file, encoding='utf-8').read()
     s = normalize_dates(s)  # convert israeli (european) dates to ISO dates
                             # green-invoice requires them,
                             # plus we must sort by date.
@@ -392,15 +392,20 @@ def self_test():
 18/12/2026	גגג גגיגיג	20	567	987654	333.00	תאריך חדש מדי
 18/12/2021	גגג גגגיג	34	567	987654	222.00	תאריך ישן מדי
 '''
-    open(f,'w').write(test_data)
+    open(f,'w',encoding='utf-8').write(test_data)
     main(f, conf)
 
 
 conf = read_conf()
-if f'{sys.version_info.major:02d}{sys.version_info.minor:02d}' < '0310':
-    msg = f'WARNING !!! '*5 + f'\n "bank2invoice.py" was tested on python 3.10, not on {sys.version_info.major}.{sys.version_info.minor}.'
+# check for known version and operating system
+if sys.version_info >= (3, 8) or sys.version_info <= (3, 9):
+    print("This script is good on Python 3.8.x.")
+elif f'{sys.version_info.major:02d}{sys.version_info.minor:02d}' > '0310':
+    msg = '"bank2invoice.py" was tested on python 3.10, you are using python ' + sys.version
+    if sys.platform == 'win32':
+        msg += f'\nAs a Windows user, follow "Windows Note:" in the install section of readme\n\n'
     print(msg)
-    err(msg)
+    Warning(msg)
 
 
 
