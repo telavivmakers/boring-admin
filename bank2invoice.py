@@ -1,21 +1,20 @@
 #!/usr/bin/python
 """
-TAMI invoice bank-to-invoice connection
-receive:   (XXXXX) bank's transactions list, in Excel format
-purpose:
-    issue invoices
-    (maybe) send them to whoever.
+Creates receipts in TAMI's accounting provider, from bank-reports.
+
+input:   (XXXXX) bank's transactions list, in Excel format [currently: TSV from google-sheets]
+output:  a new donation-recepit (type#405) at GreenInvoice.co.il
 
 usage:
-   bank2invoice.py  real <excel-file-1> [<excel-file-2> ...]
-   bank2invoice.py  search
-   bank2invoice.py  test
+   bank2invoice.py  real <excel-file-1> [<excel-file-2> ...]   
+   bank2invoice.py  search     # get latest existing receipts
+   bank2invoice.py  test       # 
 
-by default, running in TEST mode (inside a sandbox)
-if you want to get things into the real accounting system,
-add the command line argument: real
+*REAL vs TEST modes:*
+by default, running in TEST mode (inside a sandbox).
+if you want to get things into the real accounting system, add the command line argument: real
 
-test is using built-in data file, which is embedded in this file
+The "test" command is using built-in data file, which is embedded in this module. 
 
 started by shaharr.info,
 on request of yair, 2023-02-15
@@ -55,7 +54,8 @@ class AttrDict(dict):
 
 
 
-"""
+""" # ----- copied from green_invoice/resources/resource.py,   merely for documentation! -----
+
 class DocumentType(enum.IntEnum):
     PRICE_QUOTE = 10
     ORDER = 100
@@ -71,7 +71,6 @@ class DocumentType(enum.IntEnum):
     RECEIPT_OF_A_DEPOSIT = 600
     WITHDRAWAL_OF_DEPOSIT = 610
 
-
 class DocumentStatus(enum.IntEnum):
     OPENED_DOCUMENT = 0
     CLOSED_DOCUMENT = 1
@@ -79,18 +78,15 @@ class DocumentStatus(enum.IntEnum):
     CANCELING_OTHER_DOCUMENT = 3
     CANCELED_DOCUMENT = 4
 
-
 class DocumentLanguage(str, enum.Enum):
     HEBREW = "he"
     ENGLISH = "en"
-
 
 class Currency(str, enum.Enum):
     ILS = "ILS"
     USD = "USD"
     EUR = "EUR"
     GBP = "GBP"
-
 
 class PaymentType(enum.IntEnum):
     UNPAID = -1
@@ -104,7 +100,7 @@ class PaymentType(enum.IntEnum):
     OTHER = 11
 
 
-"""
+# ----- end of documentation ---- """
 
 
 
@@ -112,14 +108,14 @@ class PaymentType(enum.IntEnum):
 flags = re.M+re.I+re.S
 conffile = expanduser('~/.bank2invoice.ini')
 #conf = Config(json_file=expanduser('~/.config/someapp.json'))
-payment_type_map = {
+payment_type_map = {          # see docstring in guess_payment_type() 
     '^bit העברת כספים$': 10,
     '.*מזומן.*': 1,
 }
 INITIAL_LATEST_PAYMENT = '0000-00-00'
 default_payment_type = 4    # bank wire
 default_doctype = DocumentType.RECEIPT_FOR_DONATION
-MAX_DAYS = 49
+MAX_DAYS = 49    
 BACK_DAYS = 40
 banks = {
     4: "בנק יהב",
@@ -176,6 +172,7 @@ def err(msg, fatal=False):
 
 
 def guess_payment_type(payment, conf):
+    """ for guessing trx classification based on payment's comments. """
     for key in payment_type_map.keys():
         if re.match(key, payment.comments):
             return payment_type_map[key]
@@ -193,6 +190,7 @@ def read_conf():
     return conf
 
 def normalize_dates(s):
+    """ convert dd/mm/yyyy (eu dates) to yyyy-mm-dd (ISO dates) """
     return re.sub(r'([0-3]\d)/([01]\d)/(20[23]\d)', r'\3-\2-\1', s, flags=flags)
 
 
@@ -200,18 +198,17 @@ def get_existing_documents(dtype):
     """ purpose:  to prevent duplicates,
     and to get last receipt date (cant add earlier reciept)"""
 
-    # search documents since 100 days ago
+    # search documents since 100 days ago. earlier dates aren't relevant. I hope.
     from_date = (datetime.today() - timedelta(days=100)).strftime('%Y-%m-%d')
     to_date = iso_date()
     documentResource = DocumentResource()
     Payment.latest = INITIAL_LATEST_PAYMENT
     results = []
     docs = set()
-    PAGES = 6
+    PAGES = 6    # just a random number; green-invoice's paging system is beyond logic. 6 sounds nice. 10 was taking too long. 1 page with pagesize 300 was giving only 25 recs per page anyway.
 
     for page in range(PAGES):
         print(f'downloading existing docs, page {page} / {PAGES}')
-
         params = dumps({
             "page": page, "pageSize": 50,
             "type": [ dtype ], "sort": "documentDate",
@@ -225,7 +222,7 @@ def get_existing_documents(dtype):
 
 
     for ret in results:
-        #print(ret)
+        # convert green-invoices entity to our Payment() object.  We need that to compare -> prevent  duplicates.
         doc = Payment( **dict(
             type=ret['type'],
             pay_date=ret['payment'][0]["date"],
@@ -234,7 +231,7 @@ def get_existing_documents(dtype):
             client_name=ret['client']['name'],
             comments=ret['remarks']
         ) )
-        docs.add(doc)
+        docs.add(doc)   # unique items only
         Payment.latest = max(Payment.latest, doc.pay_date)
         print(f'{Payment.latest=} vs. {doc.pay_date=}')
     return docs
@@ -251,30 +248,30 @@ def payment_exists(payment, existing):
 
 def main(xl_file, conf):
     green_invoice.client.configure(
-        env="sandbox",
+        env="sandbox",                     # actually i didn't test it yet in the real system.  donno whats this.
         api_key_id = conf.api_key_id,
         api_key_secret = conf.api_key_secret,
         logger=logging.root,
     )
 
-    existing = get_existing_documents(default_doctype)  # needed to prevent duplicates
+    existing = get_existing_documents(default_doctype)  # for preventing duplicates, later
 
     s = open(xl_file).read()
-    s = normalize_dates(s)  # convert israeli (european) dates to ISO dates
+    s = normalize_dates(s)  # convert israeli (european) dates to ISO dates:
                             # green-invoice requires them,
                             # plus we must sort by date.
     lines = s.splitlines()
     lines.sort()
     for line in lines:
-        if not '\t' in line: continue      # empty lines
-        if line[:2] !='20': continue   # should be year; header lines
+        if not '\t' in line: continue    # empty lines
+        if line[:2] !='20': continue     # must start with the year; otherwise it's a header line
         payment = Payment(line=line)
         if not payment:  continue
         if payment_exists(payment, existing):
-            print('payment already documented')
+            print('payment already in the system. skip')
             continue
         id, url = create_receipt(payment, conf)
-        #.
+        # @todo: send url to donnor. but we dont have their contact here.
 
 
 def create_receipt(payment, conf):
@@ -298,17 +295,16 @@ def create_receipt(payment, conf):
             "signed": True,
             "rounding": False,
             "remarks": payment.comments,
-            #"income": [
+            #"income": [    # ------- according to support, this is for חשבונית מס which we don't use in our non-profit org.
             #    {
             #        "price": payment.amount,
             #        "currency": payment.currency,
             #        "quantity": 1,
             #        "description": DEFAULT_TXN_DESCRIPTION,
             #        "vatType": IncomeVatType.DEFAULT,   # based on the business type
-            #
             #    }
             #],
-            "payment": [
+            "payment": [    # ---- according to support, this is for קבלה, which is the specific accounting status we use here.
                 {
                     "type": guess_payment_type(payment, conf),
                     "date": payment.pay_date,
@@ -326,26 +322,25 @@ def create_receipt(payment, conf):
     )
     id = doc['id']
     url = doc['id']
-    #get_document_download_link(id)
     return id, url
 
 
-
-
 class Payment:
-    latest = INITIAL_LATEST_PAYMENT
+    """ represents a transaction's data """
+    
+    latest = INITIAL_LATEST_PAYMENT     # global scope
 
     def __init__(self, **kw):
         """parse a line from the bank report;
         right now i've downloaded a tab-separated file from google-spreadsheet;
+        
         overloaded usage:
             obj = Payment(line)   <- string, tab-separated, from excel
             obj = Payment({date:x, name:y, ...})   <- all object properties
         """
-        kw = AttrDict(kw)
         self.type = default_doctype
         if 'line' in kw:
-            parts = kw.line.split('\t')
+            parts = kw['line'].split('\t')
             if len(parts) != 7:
                 print('shit, bank data record must have 7 columns exactly')
                 raise Exception   # either a bug, or format change, must re-adapt the code !
@@ -360,7 +355,11 @@ class Payment:
 
 
     def __eq__(self, other):
-        #self.pay_date, self.client_name, self.bank, self.snif, self.account, self.amount, self.comments
+        """ represents the unique signature for transactions; 
+        used for comparing against existing records/transactions: (pay1 == pay2) 
+        we get from the bank these items:
+          pay_date, client_name, bank, snif, account#, amount, comments  """
+        
         return (self.type ==        other.type
             and self.pay_date ==    other.pay_date
             and self.amount ==      other.amount
@@ -368,11 +367,14 @@ class Payment:
             and self.comments ==    other.comments)     # this is tricky, @todo
 
     def __hash__(self):
+        """ makes this class hashable; i'm using it to use within set() """
         return hash(f'{self.pay_date}{self.amount}{self.client_name}')
 
 
 def iso_date():
+    """ todays date as ISO """
     return datetime.today().strftime('%Y-%m-%d')
+
 
 def self_test():
     conf = read_conf()
@@ -394,14 +396,14 @@ def self_test():
 '''
     open(f,'w').write(test_data)
     main(f, conf)
+    assert True   # @todo;  needs much better testing; 
 
 
 conf = read_conf()
-if f'{sys.version_info.major:02d}{sys.version_info.minor:02d}' < '0310':
-    msg = f'WARNING !!! '*5 + f'\n "bank2invoice.py" was tested on python 3.10, not on {sys.version_info.major}.{sys.version_info.minor}.'
+if f'{sys.version_info.major:02d}{sys.version_info.minor:02d}' < '0308':
+    msg = f'WARNING !!! '*5 + f"\n 'bank2invoice.py' was tested on python 3.10, not on {sys.version_info.major}.{sys.version_info.minor}. OTOH yair wants to run it on py3.8, Let's see if it really does!"
     print(msg)
-    err(msg)
-
+    err(msg)  # just a non blocking, non-fatal warning
 
 
 if __name__ == "__main__":
@@ -416,15 +418,15 @@ if __name__ == "__main__":
         print('test mode')
 
     files = set()
-    for arg in args:
+    for arg in args:     # parsing command line without external tricks
         if 'search' in args:
-            pass
+            pass  # @todo; make it print existing transactions; No use for that now.
 
         elif 'test' in args:
             self_test()
             exit()
 
-        elif arg[:6]=='--date':
+        elif arg[:6]=='--date':   # in case we want to register recepits as a certain date; not implemented(?)
             d = arg[7:]
             today = iso_date()
             if not re.match(r'^20[23]\d-[01]\d-[0-3]\d$', d) or arg <= today:
